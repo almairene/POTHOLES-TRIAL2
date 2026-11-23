@@ -3,71 +3,60 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Live Road Intelligence Dashboard — A Crowdsourced, Predictive and Cooperative Road Intelligence System</title>
+  <title>Live Road Intelligence Dashboard — Crowdsourced, Predictive &amp; Cooperative System</title>
 
-  <!-- Leaflet CSS (Interactive OpenStreetMap) -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     crossorigin=""
   />
-  <!-- App Styles -->
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
-  <!-- Top Header Bar -->
+  <!-- Top Header -->
   <header class="topbar">
     <div class="topbar-left">
       <div class="brand-badge">LRI</div>
       <div>
         <h1>Live Road Intelligence Dashboard</h1>
-        <p class="subtitle">A Crowdsourced, Predictive and Cooperative Road Intelligence System</p>
+        <p class="subtitle">Crowdsourced, Predictive &amp; Cooperative Road Intelligence System</p>
       </div>
     </div>
 
     <div class="topbar-right">
-      <span id="dbStatusBadge" class="status-pill status-demo" title="Database connection status">
-        ● Demo / Local Mode
-      </span>
-      <button type="button" id="btnFetchWeather" class="btn btn-secondary btn-sm">
-        🌦 Refresh Weather
-      </button>
-      <button type="button" id="btnLoadSample" class="btn btn-secondary btn-sm">
-        📊 Load Sample Data
-      </button>
-      <button type="button" id="btnOpenReportModal" class="btn btn-primary btn-sm">
-        + Report Pothole / Complaint
-      </button>
+      <span id="dbStatusBadge" class="status-pill status-demo">● Demo / Local Mode</span>
+      <button type="button" id="btnFetchWeather" class="btn btn-secondary btn-sm">🌦 Refresh Weather</button>
+      <button type="button" id="btnLoadSample" class="btn btn-secondary btn-sm">📊 Load Sample Data</button>
+      <button type="button" id="btnOpenReportModal" class="btn btn-primary btn-sm">+ Report Pothole &amp; Photo</button>
     </div>
   </header>
 
-  <!-- Three Intelligence Pillars Strip -->
-  <section class="pillars-bar" aria-label="Intelligence Pillars">
+  <!-- 3 Intelligence Pillars -->
+  <section class="pillars-bar">
     <div class="pillar-card">
       <span class="pillar-tag">1. Collective Intelligence</span>
-      <p>Multiple vehicles report and verify the same road hazard within proximity radius.</p>
+      <p>Multiple vehicles verify hazards within 20m and merge duplicate reports automatically.</p>
     </div>
     <div class="pillar-card">
       <span class="pillar-tag">2. Predictive Intelligence</span>
-      <p>Dynamic Road Risk Scores (0–100) prioritize high-risk roads using reports, crowd, age &amp; weather.</p>
+      <p>Dynamic Road Risk Scores (0–100) rank segments by reports, crowd count, severity, age &amp; weather.</p>
     </div>
     <div class="pillar-card">
       <span class="pillar-tag">3. Cooperative Intelligence</span>
-      <p>Approaching vehicles receive real-time distance and severity warnings ahead of hazards.</p>
+      <p>Approaching vehicles receive distance, road condition, and speed warnings ahead of hazards.</p>
     </div>
   </section>
 
-  <!-- Live Weather & Sensor Strip -->
+  <!-- Live Weather & Sensor Bar -->
   <section class="telemetry-strip">
     <div class="telemetry-box">
-      <span class="telemetry-label">Live Weather (Open-Meteo)</span>
-      <span id="weatherSummary" class="telemetry-value">Loading weather...</span>
+      <span class="telemetry-label">Weather Conditions (Open-Meteo)</span>
+      <span id="weatherSummary" class="telemetry-value">Fetching live weather...</span>
     </div>
     <div class="telemetry-box">
-      <span class="telemetry-label">Active GPS Coordinates</span>
+      <span class="telemetry-label">GPS Coordinates</span>
       <span id="gpsSummary" class="telemetry-value">11.0168, 76.9558 (Default)</span>
     </div>
     <div class="telemetry-box">
@@ -82,10 +71,10 @@
     </div>
   </section>
 
-  <!-- KPI Summary Cards -->
+  <!-- KPI Summary -->
   <section class="kpi-grid">
     <div class="kpi-card">
-      <span class="kpi-label">Active Hazards / Segments</span>
+      <span class="kpi-label">Active Road Hazards</span>
       <strong id="kpiTotalHazards" class="kpi-number">0</strong>
     </div>
     <div class="kpi-card">
@@ -102,32 +91,26 @@
     </div>
   </section>
 
-  <!-- Main Workspace: 5 Modules -->
+  <!-- Main Workspace -->
   <main class="main-grid">
-    <!-- Left / Primary Column: Module 1 (Live Pothole Map) & Module 2 (Vehicle Alert Network) -->
     <div class="col-primary">
       <!-- MODULE 1: Live Pothole Map -->
       <section class="card module-card" id="module-map">
         <div class="card-header">
           <div>
             <span class="module-badge">Module 1</span>
-            <h2>Live Pothole Map</h2>
+            <h2>Live Pothole Map &amp; Road Conditions</h2>
           </div>
           <div class="filter-controls">
-            <input
-              type="text"
-              id="searchRoadInput"
-              class="input input-sm"
-              placeholder="Search road or area..."
-            />
-            <select id="filterSeverity" class="select select-sm" aria-label="Filter by severity">
+            <input type="text" id="searchRoadInput" class="input input-sm" placeholder="Search road or condition..." />
+            <select id="filterSeverity" class="select select-sm" aria-label="Filter severity">
               <option value="ALL">All Severities</option>
               <option value="Low">Low</option>
               <option value="Medium">Medium</option>
               <option value="High">High</option>
               <option value="Critical">Critical</option>
             </select>
-            <select id="filterStatus" class="select select-sm" aria-label="Filter by repair status">
+            <select id="filterStatus" class="select select-sm" aria-label="Filter status">
               <option value="ALL">All Statuses</option>
               <option value="Pending">Pending</option>
               <option value="Assigned">Assigned</option>
@@ -139,11 +122,14 @@
         </div>
 
         <div class="map-toolbar">
-          <span class="map-hint">Tip: Click anywhere on the map to pick coordinates for a new report, or click a marker to inspect.</span>
-          <button type="button" id="btnCenterMapGps" class="btn btn-outline btn-sm">🎯 Center on Active GPS</button>
+          <span class="map-hint">Click anywhere on the map to place a report pin with coordinates, or click a marker to inspect photos &amp; verify.</span>
+          <div style="display:flex;gap:6px">
+            <button type="button" id="btnFixMapSize" class="btn btn-outline btn-sm">🗺 Refresh Map</button>
+            <button type="button" id="btnCenterMapGps" class="btn btn-outline btn-sm">🎯 Center GPS</button>
+          </div>
         </div>
 
-        <div id="map" class="map-container" role="region" aria-label="Interactive Pothole Map"></div>
+        <div id="map" class="map-container"></div>
       </section>
 
       <!-- MODULE 2: Vehicle Alert Network -->
@@ -151,77 +137,61 @@
         <div class="card-header">
           <div>
             <span class="module-badge">Module 2</span>
-            <h2>Vehicle Alert Network (Cooperative Alerts)</h2>
+            <h2>Vehicle Alert Network</h2>
           </div>
           <div class="alert-controls">
             <label class="inline-field">
-              Radius (m):
+              Radius:
               <select id="alertRadiusSelect" class="select select-sm">
                 <option value="150">150m</option>
                 <option value="300" selected>300m</option>
                 <option value="500">500m</option>
-                <option value="1000">1000m</option>
+                <option value="1500">1500m</option>
               </select>
             </label>
-            <button type="button" id="btnCheckAlerts" class="btn btn-secondary btn-sm">
-              🚨 Check Proximity
-            </button>
-            <button type="button" id="btnSimulateVehicle" class="btn btn-primary btn-sm">
-              🚗 Simulate Approaching Vehicle
-            </button>
-            <button type="button" id="btnClearAlerts" class="btn btn-ghost btn-sm">
-              Clear Alerts
-            </button>
+            <button type="button" id="btnCheckAlerts" class="btn btn-secondary btn-sm">🚨 Check Proximity</button>
+            <button type="button" id="btnSimulateVehicle" class="btn btn-primary btn-sm">🚗 Simulate Vehicle</button>
+            <button type="button" id="btnClearAlerts" class="btn btn-ghost btn-sm">Clear</button>
           </div>
         </div>
 
         <div id="vehicleStatusBar" class="vehicle-status-bar">
-          Vehicle Tracker: Idle — Click <strong>Simulate Approaching Vehicle</strong> or <strong>Check Proximity</strong> to test warnings.
+          Vehicle Tracker ready — click <strong>Simulate Vehicle</strong> or <strong>Check Proximity</strong>.
         </div>
-
         <div id="vehicleAlertsList" class="alerts-list">
           <p class="empty-state">No active proximity warnings right now.</p>
         </div>
       </section>
     </div>
 
-    <!-- Right Column: Module 3 (Crowd Verification) & Module 4 (Road Risk Prediction) -->
     <div class="col-secondary">
-      <!-- MODULE 3: Crowd Verification & Duplicate Detection -->
+      <!-- MODULE 3: Crowd Verification -->
       <section class="card module-card" id="module-crowd">
         <div class="card-header">
           <div>
             <span class="module-badge">Module 3</span>
             <h2>Crowd Verification &amp; Duplicates</h2>
           </div>
-          <span class="info-chip">20m Merge Radius</span>
+          <span class="info-chip">20m Auto-Merge</span>
         </div>
-
-        <p class="card-desc">
-          Nearby reports within 20m merge automatically as corroborating detections to prevent duplicate pins and boost confidence.
-        </p>
-
-        <div id="crowdActivityFeed" class="activity-feed">
-          <p class="empty-state">No crowd or duplicate events yet.</p>
-        </div>
-
+        <p class="card-desc">Reports within 20m merge automatically as crowd confirmations. Click Verify to add a crowd check.</p>
+        <div id="crowdActivityFeed" class="activity-feed"></div>
         <div id="crowdCandidatesList" class="crowd-list"></div>
       </section>
 
-      <!-- MODULE 4: Road Risk Prediction & Dynamic Score -->
+      <!-- MODULE 4: Road Risk Prediction -->
       <section class="card module-card" id="module-risk">
         <div class="card-header">
           <div>
             <span class="module-badge">Module 4</span>
             <h2>Road Risk Prediction (0–100)</h2>
           </div>
-          <select id="sortRiskSelect" class="select select-sm" aria-label="Sort road risk">
-            <option value="SCORE_DESC">Highest Risk First</option>
-            <option value="SCORE_ASC">Lowest Risk First</option>
+          <select id="sortRiskSelect" class="select select-sm" aria-label="Sort risk">
+            <option value="SCORE_DESC">Highest Risk</option>
+            <option value="SCORE_ASC">Lowest Risk</option>
             <option value="REPORTS_DESC">Most Reports</option>
           </select>
         </div>
-
         <div id="roadRiskList" class="risk-list"></div>
       </section>
     </div>
@@ -232,15 +202,11 @@
     <div class="card-header">
       <div>
         <span class="module-badge">Module 5</span>
-        <h2>Authority Portal — Complaints, Repair Assignments &amp; Resolution</h2>
+        <h2>Authority Portal — Complaints, Road Conditions &amp; Repairs</h2>
       </div>
       <div class="authority-actions">
-        <button type="button" id="btnAuthorityNewComplaint" class="btn btn-primary btn-sm">
-          📝 File Official Complaint
-        </button>
-        <button type="button" id="btnResetDemoData" class="btn btn-danger-outline btn-sm">
-          ↺ Reset Demo Data
-        </button>
+        <button type="button" id="btnAuthorityNewComplaint" class="btn btn-primary btn-sm">📝 File Complaint</button>
+        <button type="button" id="btnResetDemoData" class="btn btn-danger-outline btn-sm">↺ Reset Demo Data</button>
       </div>
     </div>
 
@@ -248,11 +214,11 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Road Segment &amp; ID</th>
+            <th>Photo &amp; Road</th>
+            <th>Road Condition</th>
             <th>GPS</th>
-            <th>Reports / Crowd</th>
+            <th>Crowd</th>
             <th>Risk Score</th>
-            <th>Weather / Water</th>
             <th>Repair Status</th>
             <th>Assigned Crew</th>
             <th>Actions</th>
@@ -263,12 +229,12 @@
     </div>
   </section>
 
-  <!-- Report Pothole / Complaint Modal -->
+  <!-- Report Pothole / Complaint Modal (With Photo Upload + Road Condition) -->
   <div id="reportModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 id="reportModalTitle">Report Pothole / Road Complaint</h3>
-        <button type="button" id="btnCloseReportModal" class="btn-icon" aria-label="Close modal">✕</button>
+        <h3 id="reportModalTitle">Report Pothole &amp; Road Condition</h3>
+        <button type="button" id="btnCloseReportModal" class="btn-icon" aria-label="Close">✕</button>
       </div>
 
       <form id="potholeReportForm" class="modal-form">
@@ -279,58 +245,85 @@
           </label>
           <label class="form-group">
             <span>Vehicle / Reporter ID</span>
-            <input type="text" id="inputVehicleId" class="input" placeholder="e.g., TN-37-AB-1024 or Citizen" value="VEH-101" />
+            <input type="text" id="inputVehicleId" class="input" value="VEH-101" />
           </label>
         </div>
 
         <div class="form-row three-col">
           <label class="form-group">
             <span>Latitude *</span>
-            <input type="number" step="any" id="inputLat" class="input" placeholder="11.0168" required />
+            <input type="number" step="any" id="inputLat" class="input" required />
           </label>
           <label class="form-group">
             <span>Longitude *</span>
-            <input type="number" step="any" id="inputLng" class="input" placeholder="76.9558" required />
+            <input type="number" step="any" id="inputLng" class="input" required />
           </label>
           <div class="form-group align-bottom">
-            <button type="button" id="btnModalUseGps" class="btn btn-outline btn-sm full-width">
-              📍 Capture GPS
-            </button>
+            <button type="button" id="btnModalUseGps" class="btn btn-outline btn-sm full-width">📍 GPS</button>
           </div>
         </div>
 
         <div class="form-row">
           <label class="form-group">
-            <span>Impact Severity *</span>
+            <span>Severity *</span>
             <select id="inputSeverity" class="select">
-              <option value="Low">Low (Minor unevenness)</option>
-              <option value="Medium" selected>Medium (Noticeable jolt)</option>
-              <option value="High">High (Deep pothole / suspension risk)</option>
-              <option value="Critical">Critical (Severe hazard / accident risk)</option>
+              <option value="Low">Low</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="High">High</option>
+              <option value="Critical">Critical</option>
             </select>
           </label>
 
           <label class="form-group">
-            <span>Detection Source</span>
-            <select id="inputSource" class="select">
-              <option value="Smartphone GPS + Accelerometer">Smartphone GPS + Accelerometer</option>
-              <option value="Citizen Complaint">Citizen Complaint</option>
-              <option value="Fleet Vehicle Sensor">Fleet Vehicle Sensor</option>
+            <span>Road Surface Condition *</span>
+            <select id="inputRoadCondition" class="select">
+              <option value="Dry Asphalt">Dry Asphalt</option>
+              <option value="Wet / Slippery">Wet / Slippery</option>
+              <option value="Waterlogged">Waterlogged</option>
+              <option value="Broken / Gravel">Broken / Gravel</option>
+              <option value="Lane Partially Blocked">Lane Partially Blocked</option>
             </select>
           </label>
         </div>
 
+        <!-- Photo Upload + Live Preview -->
+        <div class="form-group">
+          <span>Upload Pothole Photo (JPG, PNG, WEBP)</span>
+          <input type="file" id="inputPhotoFile" class="input" accept="image/*" />
+          <div id="photoPreviewBox" class="photo-preview-box hidden">
+            <img id="photoPreviewImg" alt="Uploaded pothole preview" />
+            <button type="button" id="btnRemovePhoto" class="btn btn-danger-outline btn-sm">Remove Photo</button>
+          </div>
+        </div>
+
         <label class="checkbox-row">
           <input type="checkbox" id="inputWaterlogged" />
-          <span>Waterlogging present around this location</span>
+          <span>Waterlogging / standing water present</span>
         </label>
 
         <label class="form-group">
-          <span>Notes / Description</span>
-          <textarea id="inputNotes" class="textarea" rows="2" placeholder="Describe pothole size, lane position, or traffic impact..."></textarea>
+          <span>Road Condition Notes</span>
+          <textarea id="inputNotes" class="textarea" rows="2" placeholder="Describe pothole depth, lane position, drainage, or traffic impact..."></textarea>
         </label>
 
         <div id="duplicatePreviewBanner" class="info-banner hidden"></div>
 
         <div class="modal-footer">
-          <button type="button" id="btnCancelReportModal" class="btn btn-ghost">Cancel</button
+          <button type="button" id="btnCancelReportModal" class="btn btn-ghost">Cancel</button>
+          <button type="submit" id="btnSubmitReport" class="btn btn-primary">Submit Report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <script src="js/firebase-config.js"></script>
+  <script src="js/weather.js"></script>
+  <script src="js/sensors.js"></script>
+  <script src="js/intelligence.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
