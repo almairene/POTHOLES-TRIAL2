@@ -1,6 +1,5 @@
 // Firebase Realtime Database configuration + Local Fallback Store
 // Replace FIREBASE_CONFIG values with your Firebase Console project credentials to enable live cloud sync.
-
 const FIREBASE_CONFIG = {
   apiKey: "",
   authDomain: "",
