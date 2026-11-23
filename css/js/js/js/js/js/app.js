@@ -1,10 +1,8 @@
-// Main Application Controller: 5 Modules, Map, Event Handlers & UI Rendering
-
 const AppState = {
   hazards: [],
   crowdEvents: [],
   activeAlerts: [],
-  simulatedVehicle: null,
+  currentPhotoDataUrl: "",
   simTimer: null,
   filters: {
     search: "",
@@ -25,9 +23,7 @@ function showToast(message) {
   el.className = "toast";
   el.textContent = message;
   container.appendChild(el);
-  setTimeout(() => {
-    el.remove();
-  }, 3600);
+  setTimeout(() => el.remove(), 3500);
 }
 
 function escapeHtml(str) {
@@ -38,6 +34,28 @@ function escapeHtml(str) {
     .replaceAll('"', "&quot;");
 }
 
+function compressImageFile(file, maxWidth = 640, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => reject(new Error("Could not load selected image."));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function getMarkerColor(hazard, riskScore) {
   if (hazard.status === "Resolved") return "#16a34a";
   if (riskScore >= 75 || hazard.severity === "Critical") return "#991b1b";
@@ -46,7 +64,17 @@ function getMarkerColor(hazard, riskScore) {
   return "#2563eb";
 }
 
+function refreshMapLayout() {
+  if (!AppState.map) return;
+  setTimeout(() => {
+    AppState.map.invalidateSize();
+  }, 150);
+}
+
 function initMap() {
+  const mapEl = document.getElementById("map");
+  if (!mapEl || typeof L === "undefined") return;
+
   const { lat, lng } = SensorService.coords;
   AppState.map = L.map("map").setView([lat, lng], 12);
 
@@ -57,15 +85,16 @@ function initMap() {
 
   AppState.markersLayer = L.layerGroup().addTo(AppState.map);
 
-  // Clicking map picks coordinates & opens report modal with those coords
   AppState.map.on("click", (e) => {
     const clickedLat = Number(e.latlng.lat.toFixed(6));
     const clickedLng = Number(e.latlng.lng.toFixed(6));
     SensorService.setCoords(clickedLat, clickedLng, null, "Map Pin");
     openReportModal({ lat: clickedLat, lng: clickedLng });
-    showToast(`Selected map location: ${clickedLat}, ${clickedLng}`);
+    showToast(`Pin set at ${clickedLat}, ${clickedLng}`);
   });
 
+  window.addEventListener("resize", refreshMapLayout);
+  refreshMapLayout();
   updateUserMapMarker();
 }
 
@@ -82,7 +111,7 @@ function updateUserMapMarker() {
       weight: 2
     })
       .addTo(AppState.map)
-      .bindPopup("Active GPS / Reference Point");
+      .bindPopup("Active GPS Position");
   } else {
     AppState.userMarker.setLatLng([lat, lng]);
   }
@@ -97,7 +126,7 @@ function getFilteredHazards() {
     const matchesSearch =
       !q ||
       String(h.roadName || "").toLowerCase().includes(q) ||
-      String(h.id || "").toLowerCase().includes(q) ||
+      String(h.roadCondition || "").toLowerCase().includes(q) ||
       String(h.notes || "").toLowerCase().includes(q);
     const matchesSev = sev === "ALL" || h.severity === sev;
     const matchesStatus = st === "ALL" || h.status === st;
@@ -112,6 +141,7 @@ function renderMapMarkers(hazards) {
   hazards.forEach((h) => {
     const risk = IntelligenceEngine.calculateRoadRiskScore(h, WeatherService.latest);
     const color = getMarkerColor(h, risk.score);
+    const cond = h.roadCondition || (h.waterlogged ? "Waterlogged" : "Dry Asphalt");
 
     const marker = L.circleMarker([Number(h.lat), Number(h.lng)], {
       radius: Math.max(8, Math.min(16, 7 + Number(h.vehicleCount || 1))),
@@ -121,22 +151,22 @@ function renderMapMarkers(hazards) {
       fillOpacity: 0.92
     });
 
+    const photoHtml = h.photoUrl
+      ? `<img src="${h.photoUrl}" alt="${escapeHtml(h.roadName)} photo" class="popup-photo" />`
+      : "";
+
     const popupHtml = `
-      <div style="min-width:200px">
+      <div style="min-width:210px">
         <strong>${escapeHtml(h.roadName)}</strong><br/>
-        <small>ID: ${escapeHtml(h.id)} • Status: <b>${escapeHtml(h.status)}</b></small><br/>
+        <small>Condition: <b>${escapeHtml(cond)}</b> • Status: <b>${escapeHtml(h.status)}</b></small><br/>
         <div style="margin-top:6px;font-size:12px">
           Risk Score: <b>${risk.score}/100</b> (${escapeHtml(risk.tier)})<br/>
-          Reports: <b>${h.reportCount}</b> • Vehicles: <b>${h.vehicleCount}</b><br/>
-          Severity: <b>${escapeHtml(h.severity)}</b> • Waterlogged: <b>${h.waterlogged ? "Yes" : "No"}</b>
+          Reports: <b>${h.reportCount}</b> • Vehicles: <b>${h.vehicleCount}</b>
         </div>
+        ${photoHtml}
         <div class="map-popup-actions">
-          <button type="button" class="btn btn-outline btn-sm" onclick="window.handleVerifyHazard('${escapeHtml(h.id)}')">
-            ✓ Verify (+1)
-          </button>
-          <button type="button" class="btn btn-primary btn-sm" onclick="window.handleFocusHazard('${escapeHtml(h.id)}')">
-            Zoom
-          </button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="verify" data-id="${escapeHtml(h.id)}">✓ Verify (+1)</button>
+          <button type="button" class="btn btn-primary btn-sm" data-action="focus" data-id="${escapeHtml(h.id)}">Zoom</button>
         </div>
       </div>
     `;
@@ -147,59 +177,57 @@ function renderMapMarkers(hazards) {
 }
 
 function renderKpis(allHazards) {
-  const total = allHazards.length;
-  const verified = allHazards.filter((h) => Number(h.vehicleCount || 1) >= 2 || Number(h.reportCount || 1) >= 2).length;
-  const highRisk = allHazards.filter((h) => {
-    const r = IntelligenceEngine.calculateRoadRiskScore(h, WeatherService.latest);
-    return r.score >= 70 && h.status !== "Resolved";
-  }).length;
-  const pendingRepairs = allHazards.filter((h) => h.status !== "Resolved").length;
-
-  document.getElementById("kpiTotalHazards").textContent = String(total);
-  document.getElementById("kpiVerifiedHazards").textContent = String(verified);
-  document.getElementById("kpiHighRisk").textContent = String(highRisk);
-  document.getElementById("kpiPendingRepairs").textContent = String(pendingRepairs);
+  document.getElementById("kpiTotalHazards").textContent = String(allHazards.length);
+  document.getElementById("kpiVerifiedHazards").textContent = String(
+    allHazards.filter((h) => Number(h.vehicleCount || 1) >= 2 || Number(h.reportCount || 1) >= 2).length
+  );
+  document.getElementById("kpiHighRisk").textContent = String(
+    allHazards.filter(
+      (h) =>
+        IntelligenceEngine.calculateRoadRiskScore(h, WeatherService.latest).score >= 70 &&
+        h.status !== "Resolved"
+    ).length
+  );
+  document.getElementById("kpiPendingRepairs").textContent = String(
+    allHazards.filter((h) => h.status !== "Resolved").length
+  );
 }
 
 function renderCrowdModule(allHazards) {
   const feedEl = document.getElementById("crowdActivityFeed");
-  if (AppState.crowdEvents.length === 0) {
-    feedEl.innerHTML = `<p class="empty-state">No crowd or duplicate events yet. Submit a nearby report or click Verify on a hazard.</p>`;
-  } else {
-    feedEl.innerHTML = AppState.crowdEvents
-      .slice(0, 5)
-      .map((ev) => `<div class="feed-item">${escapeHtml(ev)}</div>`)
-      .join("");
-  }
+  feedEl.innerHTML =
+    AppState.crowdEvents.length === 0
+      ? `<p class="empty-state">No crowd or duplicate events yet.</p>`
+      : AppState.crowdEvents
+          .slice(0, 5)
+          .map((ev) => `<div class="feed-item">${escapeHtml(ev)}</div>`)
+          .join("");
 
   const listEl = document.getElementById("crowdCandidatesList");
-  const sortedByCrowd = [...allHazards].sort(
+  const sorted = [...allHazards].sort(
     (a, b) => Number(b.vehicleCount || 1) - Number(a.vehicleCount || 1)
   );
 
-  listEl.innerHTML = sortedByCrowd
+  listEl.innerHTML = sorted
     .slice(0, 5)
-    .map(
-      (h) => `
-      <div class="crowd-card">
-        <div class="crowd-top">
-          <span class="crowd-road">${escapeHtml(h.roadName)}</span>
-          <span class="badge badge-${escapeHtml(String(h.severity || "Medium").toLowerCase())}">${escapeHtml(h.severity)}</span>
+    .map((h) => {
+      const cond = h.roadCondition || (h.waterlogged ? "Waterlogged" : "Dry Asphalt");
+      return `
+        <div class="crowd-card">
+          <div class="crowd-top">
+            <span class="crowd-road">${escapeHtml(h.roadName)}</span>
+            <span class="badge badge-${escapeHtml(String(h.severity || "Medium").toLowerCase())}">${escapeHtml(h.severity)}</span>
+          </div>
+          <div class="alert-meta" style="margin-top:4px">
+            <strong>${h.reportCount}</strong> reports • <strong>${h.vehicleCount}</strong> vehicles • <strong>${escapeHtml(cond)}</strong>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button type="button" class="btn btn-outline btn-sm" data-action="verify" data-id="${escapeHtml(h.id)}">✓ Verify Hazard</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="focus" data-id="${escapeHtml(h.id)}">📍 Locate</button>
+          </div>
         </div>
-        <div class="alert-meta" style="margin-top:4px">
-          <strong>${h.reportCount}</strong> total reports • <strong>${h.vehicleCount}</strong> vehicles • Status: <strong>${escapeHtml(h.status)}</strong>
-        </div>
-        <div style="margin-top:8px;display:flex;gap:6px">
-          <button type="button" class="btn btn-outline btn-sm" onclick="window.handleVerifyHazard('${escapeHtml(h.id)}')">
-            ✓ Confirm / Verify Hazard
-          </button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="window.handleFocusHazard('${escapeHtml(h.id)}')">
-            📍 Locate
-          </button>
-        </div>
-      </div>
-    `
-    )
+      `;
+    })
     .join("");
 }
 
@@ -220,13 +248,14 @@ function renderRiskModule(allHazards) {
   listEl.innerHTML = scored
     .map(({ hazard: h, risk }) => {
       const b = risk.breakdown;
+      const cond = h.roadCondition || (h.waterlogged ? "Waterlogged" : "Dry Asphalt");
       return `
         <div class="risk-card">
           <div class="risk-top">
             <div>
               <div class="risk-road">${escapeHtml(h.roadName)}</div>
               <div class="alert-meta">
-                ${h.reportCount} reports • ${h.vehicleCount} vehicles • ${h.waterlogged ? "Waterlogged • " : ""}${escapeHtml(h.status)}
+                ${escapeHtml(cond)} • ${h.reportCount} reports • ${h.vehicleCount} vehicles • ${escapeHtml(h.status)}
               </div>
             </div>
             <span class="risk-score-badge ${risk.tierClass}">${risk.score}/100 • ${escapeHtml(risk.tier)}</span>
@@ -251,49 +280,46 @@ function renderAuthorityTable(allHazards) {
   tbody.innerHTML = allHazards
     .map((h) => {
       const risk = IntelligenceEngine.calculateRoadRiskScore(h, WeatherService.latest);
+      const cond = h.roadCondition || (h.waterlogged ? "Waterlogged" : "Dry Asphalt");
+      const thumb = h.photoUrl
+        ? `<img src="${h.photoUrl}" alt="${escapeHtml(h.roadName)}" class="hazard-thumb" />`
+        : `<span class="info-chip">No Photo</span>`;
+
       const statuses = ["Pending", "Assigned", "In Progress", "Resolved"];
       const optionsHtml = statuses
-        .map(
-          (st) =>
-            `<option value="${st}" ${h.status === st ? "selected" : ""}>${st}</option>`
-        )
+        .map((st) => `<option value="${st}" ${h.status === st ? "selected" : ""}>${st}</option>`)
         .join("");
 
       return `
         <tr>
           <td>
-            <strong>${escapeHtml(h.roadName)}</strong><br/>
-            <span class="alert-meta">${escapeHtml(h.id)} • <span class="badge badge-${escapeHtml(String(h.severity || "Medium").toLowerCase())}">${escapeHtml(h.severity)}</span></span>
+            <div class="road-cell-flex">
+              ${thumb}
+              <div>
+                <strong>${escapeHtml(h.roadName)}</strong><br/>
+                <span class="alert-meta">${escapeHtml(h.id)} • <span class="badge badge-${escapeHtml(String(h.severity || "Medium").toLowerCase())}">${escapeHtml(h.severity)}</span></span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong>${escapeHtml(cond)}</strong><br/>
+            <span class="alert-meta">${h.waterlogged ? "Waterlogged • " : ""}${WeatherService.latest.precipitationMm.toFixed(1)}mm rain</span>
           </td>
           <td class="alert-meta">${Number(h.lat).toFixed(4)}, ${Number(h.lng).toFixed(4)}</td>
           <td><strong>${h.reportCount}</strong> rep / <strong>${h.vehicleCount}</strong> veh</td>
           <td><span class="risk-score-badge ${risk.tierClass}">${risk.score}/100</span></td>
           <td>
-            ${h.waterlogged ? '<span class="badge badge-water">Waterlogged</span> ' : ""}
-            <span class="alert-meta">${WeatherService.latest.precipitationMm.toFixed(1)}mm</span>
-          </td>
-          <td>
-            <select class="select select-sm" onchange="window.handleStatusChange('${escapeHtml(h.id)}', this.value)">
+            <select class="select select-sm" data-action="status" data-id="${escapeHtml(h.id)}">
               ${optionsHtml}
             </select>
           </td>
           <td>
-            <input
-              type="text"
-              class="input crew-input"
-              id="crew-${escapeHtml(h.id)}"
-              value="${escapeHtml(h.assignedCrew || "")}"
-              placeholder="Assign crew..."
-            />
+            <input type="text" class="input crew-input" id="crew-${escapeHtml(h.id)}" value="${escapeHtml(h.assignedCrew || "")}" placeholder="Crew name..." />
           </td>
           <td>
             <div style="display:flex;gap:4px">
-              <button type="button" class="btn btn-outline btn-sm" onclick="window.handleSaveCrew('${escapeHtml(h.id)}')">
-                Save
-              </button>
-              <button type="button" class="btn btn-danger-outline btn-sm" onclick="window.handleDeleteHazard('${escapeHtml(h.id)}')">
-                ✕
-              </button>
+              <button type="button" class="btn btn-outline btn-sm" data-action="save-crew" data-id="${escapeHtml(h.id)}">Save</button>
+              <button type="button" class="btn btn-danger-outline btn-sm" data-action="delete" data-id="${escapeHtml(h.id)}">✕</button>
             </div>
           </td>
         </tr>
@@ -304,7 +330,7 @@ function renderAuthorityTable(allHazards) {
 
 function renderVehicleAlerts() {
   const listEl = document.getElementById("vehicleAlertsList");
-  if (!AppState.activeAlerts || AppState.activeAlerts.length === 0) {
+  if (!AppState.activeAlerts.length) {
     listEl.innerHTML = `<p class="empty-state">No active proximity warnings right now.</p>`;
     return;
   }
@@ -317,12 +343,10 @@ function renderVehicleAlerts() {
           <div>
             <div class="alert-title">⚠️ ${escapeHtml(al.roadName)} — ${al.distanceMeters}m ahead</div>
             <div class="alert-meta">
-              Severity: <strong>${escapeHtml(al.severity)}</strong> • Risk Score: <strong>${al.riskScore}/100</strong> • ${escapeHtml(al.speedAdvice)}
+              Severity: <strong>${escapeHtml(al.severity)}</strong> • Risk: <strong>${al.riskScore}/100</strong> • ${escapeHtml(al.speedAdvice)}
             </div>
           </div>
-          <button type="button" class="btn btn-outline btn-sm" onclick="window.handleFocusHazard('${escapeHtml(al.hazardId)}')">
-            View
-          </button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="focus" data-id="${escapeHtml(al.hazardId)}">View</button>
         </div>
       `;
     })
@@ -330,71 +354,64 @@ function renderVehicleAlerts() {
 }
 
 function renderAll() {
-  const filtered = getFilteredHazards();
   renderKpis(AppState.hazards);
-  renderMapMarkers(filtered);
+  renderMapMarkers(getFilteredHazards());
   renderCrowdModule(AppState.hazards);
   renderRiskModule(AppState.hazards);
   renderAuthorityTable(AppState.hazards);
   renderVehicleAlerts();
 }
 
-// Global window handlers for inline table/popup buttons
-window.handleVerifyHazard = async function (id) {
+async function performAction(action, id, extraValue = null) {
   const target = AppState.hazards.find((h) => h.id === id);
   if (!target) return;
-  const updated = IntelligenceEngine.verifyHazard(target);
-  await RoadStore.saveHazard(updated);
-  const msg = `Crowd verified ${updated.roadName} (${updated.reportCount} reports, ${updated.vehicleCount} vehicles).`;
-  AppState.crowdEvents.unshift(msg);
-  showToast(msg);
-};
 
-window.handleFocusHazard = function (id) {
-  const target = AppState.hazards.find((h) => h.id === id);
-  if (!target || !AppState.map) return;
-  AppState.map.setView([Number(target.lat), Number(target.lng)], 15);
-  showToast(`Focused on ${target.roadName}`);
-};
+  if (action === "verify") {
+    const updated = IntelligenceEngine.verifyHazard(target);
+    await RoadStore.saveHazard(updated);
+    const msg = `Crowd verified ${updated.roadName} (${updated.reportCount} reports, ${updated.vehicleCount} vehicles).`;
+    AppState.crowdEvents.unshift(msg);
+    showToast(msg);
+  } else if (action === "focus") {
+    if (AppState.map) {
+      AppState.map.setView([Number(target.lat), Number(target.lng)], 15);
+      refreshMapLayout();
+    }
+    showToast(`Focused on ${target.roadName}`);
+  } else if (action === "status") {
+    await RoadStore.saveHazard({ ...target, status: extraValue });
+    showToast(`${target.roadName} status → ${extraValue}`);
+  } else if (action === "save-crew") {
+    const crewEl = document.getElementById(`crew-${id}`);
+    const crewName = crewEl ? crewEl.value.trim() || "Unassigned" : "Unassigned";
+    await RoadStore.saveHazard({ ...target, assignedCrew: crewName });
+    showToast(`Assigned "${crewName}" to ${target.roadName}`);
+  } else if (action === "delete") {
+    await RoadStore.deleteHazard(id);
+    showToast(`Removed ${target.roadName}`);
+  }
+}
 
-window.handleStatusChange = async function (id, newStatus) {
-  const target = AppState.hazards.find((h) => h.id === id);
-  if (!target) return;
-  const updated = { ...target, status: newStatus };
-  await RoadStore.saveHazard(updated);
-  showToast(`${target.roadName} status updated to ${newStatus}`);
-};
-
-window.handleSaveCrew = async function (id) {
-  const target = AppState.hazards.find((h) => h.id === id);
-  const inputEl = document.getElementById(`crew-${id}`);
-  if (!target || !inputEl) return;
-  const crewName = inputEl.value.trim() || "Unassigned";
-  const updated = { ...target, assignedCrew: crewName };
-  await RoadStore.saveHazard(updated);
-  showToast(`Assigned "${crewName}" to ${target.roadName}`);
-};
-
-window.handleDeleteHazard = async function (id) {
-  const target = AppState.hazards.find((h) => h.id === id);
-  await RoadStore.deleteHazard(id);
-  showToast(`Removed ${target ? target.roadName : id}`);
-};
+function setPhotoPreview(dataUrl) {
+  AppState.currentPhotoDataUrl = dataUrl || "";
+  const box = document.getElementById("photoPreviewBox");
+  const img = document.getElementById("photoPreviewImg");
+  if (AppState.currentPhotoDataUrl) {
+    img.src = AppState.currentPhotoDataUrl;
+    box.classList.remove("hidden");
+  } else {
+    img.removeAttribute("src");
+    box.classList.add("hidden");
+  }
+}
 
 function openReportModal(prefill = {}) {
   const modal = document.getElementById("reportModal");
   document.getElementById("inputLat").value = prefill.lat ?? SensorService.coords.lat.toFixed(6);
   document.getElementById("inputLng").value = prefill.lng ?? SensorService.coords.lng.toFixed(6);
-  if (prefill.roadName) {
-    document.getElementById("inputRoadName").value = prefill.roadName;
-  }
-  if (prefill.severity) {
-    document.getElementById("inputSeverity").value = prefill.severity;
-  }
-  if (prefill.notes) {
-    document.getElementById("inputNotes").value = prefill.notes;
-  }
-
+  if (prefill.roadName) document.getElementById("inputRoadName").value = prefill.roadName;
+  if (prefill.severity) document.getElementById("inputSeverity").value = prefill.severity;
+  if (prefill.notes) document.getElementById("inputNotes").value = prefill.notes;
   checkDuplicatePreview();
   modal.classList.remove("hidden");
 }
@@ -402,6 +419,7 @@ function openReportModal(prefill = {}) {
 function closeReportModal() {
   document.getElementById("reportModal").classList.add("hidden");
   document.getElementById("potholeReportForm").reset();
+  setPhotoPreview("");
   document.getElementById("duplicatePreviewBanner").classList.add("hidden");
 }
 
@@ -413,19 +431,16 @@ function checkDuplicatePreview() {
     banner.classList.add("hidden");
     return;
   }
-
   const nearby = IntelligenceEngine.findNearbyHazard(AppState.hazards, lat, lng, 20);
   if (nearby) {
-    banner.textContent = `Duplicate / Crowd-Merge Detected: Within ${Math.round(
-      nearby.distanceMeters
-    )}m of "${nearby.hazard.roadName}". Submitting will merge into this hazard and boost crowd verification.`;
+    banner.textContent = `Duplicate / Crowd-Merge within ${Math.round(nearby.distanceMeters)}m of "${nearby.hazard.roadName}". Submitting will merge and boost crowd count.`;
     banner.classList.remove("hidden");
   } else {
     banner.classList.add("hidden");
   }
 }
 
-function runProximityCheck(lat, lng, label = "Current Location") {
+function runProximityCheck(lat, lng, label = "Current GPS") {
   const radius = Number(document.getElementById("alertRadiusSelect").value || 300);
   const alerts = IntelligenceEngine.evaluateVehicleAlerts(
     lat,
@@ -436,34 +451,29 @@ function runProximityCheck(lat, lng, label = "Current Location") {
   );
   AppState.activeAlerts = alerts;
   document.getElementById("vehicleStatusBar").innerHTML =
-    `Vehicle Tracker (<strong>${escapeHtml(label)}</strong> at ${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}) • Radius: <strong>${radius}m</strong> • Active Warnings: <strong>${alerts.length}</strong>`;
+    `Vehicle Tracker (<strong>${escapeHtml(label)}</strong>) • Radius: <strong>${radius}m</strong> • Active Alerts: <strong>${alerts.length}</strong>`;
   renderVehicleAlerts();
   return alerts;
 }
 
 function startVehicleSimulation() {
-  if (AppState.simTimer) {
-    clearInterval(AppState.simTimer);
-    AppState.simTimer = null;
-  }
-
-  const activeTargets = AppState.hazards.filter((h) => h.status !== "Resolved");
-  const goal = activeTargets[0] || { lat: 11.0245, lng: 76.9825, roadName: "Target Segment" };
+  if (AppState.simTimer) clearInterval(AppState.simTimer);
+  const target = AppState.hazards.find((h) => h.status !== "Resolved") || {
+    lat: 11.0245,
+    lng: 76.9825,
+    roadName: "Target Segment"
+  };
 
   let step = 0;
   const totalSteps = 8;
-  const startLat = Number(goal.lat) - 0.0045;
-  const startLng = Number(goal.lng) - 0.0045;
-
-  showToast(`Simulating vehicle approaching ${goal.roadName}...`);
+  const startLat = Number(target.lat) - 0.004;
+  const startLng = Number(target.lng) - 0.004;
 
   const tick = () => {
     step += 1;
-    const progress = Math.min(1, step / totalSteps);
-    const curLat = startLat + (Number(goal.lat) - startLat) * progress;
-    const curLng = startLng + (Number(goal.lng) - startLng) * progress;
-
-    AppState.simulatedVehicle = { lat: curLat, lng: curLng };
+    const progress = step / totalSteps;
+    const curLat = startLat + (Number(target.lat) - startLat) * progress;
+    const curLng = startLng + (Number(target.lng) - startLng) * progress;
 
     if (AppState.map) {
       if (!AppState.vehicleMarker) {
@@ -475,17 +485,13 @@ function startVehicleSimulation() {
           weight: 2
         })
           .addTo(AppState.map)
-          .bindPopup("Simulated Approaching Vehicle");
+          .bindPopup("Approaching Vehicle");
       } else {
         AppState.vehicleMarker.setLatLng([curLat, curLng]);
       }
     }
 
-    const alerts = runProximityCheck(curLat, curLng, `Sim Vehicle (${step}/${totalSteps})`);
-    if (alerts.length > 0 && step % 2 === 1) {
-      showToast(`Alert: ${alerts[0].roadName} (${alerts[0].distanceMeters}m ahead)`);
-    }
-
+    runProximityCheck(curLat, curLng, `Sim Vehicle (${step}/${totalSteps})`);
     if (step >= totalSteps) {
       clearInterval(AppState.simTimer);
       AppState.simTimer = null;
@@ -497,12 +503,44 @@ function startVehicleSimulation() {
 }
 
 function bindEvents() {
-  // Open / close report modal
+  // Delegated clicks & changes across lists/tables/popups
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (btn) {
+      performAction(btn.dataset.action, btn.dataset.id);
+    }
+  });
+
+  document.addEventListener("change", (e) => {
+    const sel = e.target.closest("select[data-action='status']");
+    if (sel) {
+      performAction("status", sel.dataset.id, sel.value);
+    }
+  });
+
+  // Photo upload handler
+  document.getElementById("inputPhotoFile").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageFile(file);
+      setPhotoPreview(dataUrl);
+      showToast("Pothole photo attached.");
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  document.getElementById("btnRemovePhoto").addEventListener("click", () => {
+    document.getElementById("inputPhotoFile").value = "";
+    setPhotoPreview("");
+  });
+
+  // Modal controls
   document.getElementById("btnOpenReportModal").addEventListener("click", () => openReportModal());
   document.getElementById("btnAuthorityNewComplaint").addEventListener("click", () => openReportModal());
   document.getElementById("btnCloseReportModal").addEventListener("click", closeReportModal);
   document.getElementById("btnCancelReportModal").addEventListener("click", closeReportModal);
-
   document.getElementById("inputLat").addEventListener("input", checkDuplicatePreview);
   document.getElementById("inputLng").addEventListener("input", checkDuplicatePreview);
 
@@ -512,13 +550,12 @@ function bindEvents() {
       document.getElementById("inputLat").value = c.lat.toFixed(6);
       document.getElementById("inputLng").value = c.lng.toFixed(6);
       checkDuplicatePreview();
-      showToast("Captured current GPS into form.");
+      showToast("GPS filled into form.");
     } catch (err) {
       showToast(err.message);
     }
   });
 
-  // Submit pothole report / complaint
   document.getElementById("potholeReportForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const roadName = document.getElementById("inputRoadName").value.trim();
@@ -526,56 +563,74 @@ function bindEvents() {
     const lat = parseFloat(document.getElementById("inputLat").value);
     const lng = parseFloat(document.getElementById("inputLng").value);
     const severity = document.getElementById("inputSeverity").value;
-    const source = document.getElementById("inputSource").value;
-    const waterlogged = document.getElementById("inputWaterlogged").checked;
+    const roadCondition = document.getElementById("inputRoadCondition").value;
+    const waterlogged =
+      document.getElementById("inputWaterlogged").checked || roadCondition === "Waterlogged";
     const notes = document.getElementById("inputNotes").value.trim();
 
     if (!roadName || Number.isNaN(lat) || Number.isNaN(lng)) {
-      showToast("Please enter a valid road name and GPS coordinates.");
+      showToast("Please enter road name and valid coordinates.");
       return;
     }
 
     const result = IntelligenceEngine.processIncomingReport(
       AppState.hazards,
-      { roadName, vehicleId, lat, lng, severity, source, waterlogged, notes },
+      {
+        roadName,
+        vehicleId,
+        lat,
+        lng,
+        severity,
+        roadCondition,
+        waterlogged,
+        notes,
+        photoUrl: AppState.currentPhotoDataUrl || ""
+      },
       20
     );
 
+    // Keep uploaded photo if merged and new photo was provided
+    if (result.action === "merged" && AppState.currentPhotoDataUrl) {
+      result.hazard.photoUrl = AppState.currentPhotoDataUrl;
+    }
+    result.hazard.roadCondition = roadCondition;
+
     await RoadStore.saveHazard(result.hazard);
 
-    if (result.action === "merged") {
-      const evMsg = `Duplicate Merged (${result.distanceMeters}m): "${result.hazard.roadName}" now has ${result.hazard.reportCount} reports & ${result.hazard.vehicleCount} vehicles.`;
-      AppState.crowdEvents.unshift(evMsg);
-      showToast(evMsg);
-    } else {
-      const evMsg = `New Hazard Logged: "${result.hazard.roadName}" (${result.hazard.severity}).`;
-      AppState.crowdEvents.unshift(evMsg);
-      showToast(evMsg);
-    }
+    const msg =
+      result.action === "merged"
+        ? `Merged duplicate within ${result.distanceMeters}m into "${result.hazard.roadName}" (${result.hazard.reportCount} reports).`
+        : `Added "${result.hazard.roadName}" (${roadCondition}, ${severity}).`;
 
+    AppState.crowdEvents.unshift(msg);
+    showToast(msg);
     closeReportModal();
     if (AppState.map) {
       AppState.map.setView([lat, lng], 14);
+      refreshMapLayout();
     }
   });
 
-  // GPS & Accelerometer controls
+  // Sensors & Weather
   document.getElementById("btnUseGps").addEventListener("click", async () => {
     try {
       const c = await SensorService.fetchCurrentGps();
       updateUserMapMarker();
-      if (AppState.map) AppState.map.setView([c.lat, c.lng], 14);
-      showToast(`GPS updated: ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`);
+      if (AppState.map) {
+        AppState.map.setView([c.lat, c.lng], 14);
+        refreshMapLayout();
+      }
+      showToast(`GPS: ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`);
     } catch (err) {
-      showToast(`GPS fallback: ${err.message}`);
+      showToast(`GPS notice: ${err.message}`);
     }
   });
 
   document.getElementById("btnToggleWatchGps").addEventListener("click", (e) => {
     try {
-      const active = SensorService.toggleWatchGps();
-      e.target.textContent = active ? "🛰 Live GPS: ON" : "🛰 Live GPS: OFF";
-      showToast(active ? "Continuous GPS tracking enabled." : "Continuous GPS tracking stopped.");
+      const on = SensorService.toggleWatchGps();
+      e.target.textContent = on ? "🛰 Live GPS: ON" : "🛰 Live GPS: OFF";
+      showToast(on ? "Live GPS tracking ON" : "Live GPS tracking OFF");
     } catch (err) {
       showToast(err.message);
     }
@@ -584,44 +639,48 @@ function bindEvents() {
   document.getElementById("btnEnableMotion").addEventListener("click", async () => {
     try {
       await SensorService.enableMotionSensor();
-      document.getElementById("accelSummary").textContent = `Active (Threshold ${SensorService.joltThreshold} m/s²)`;
-      showToast("Accelerometer motion detection enabled.");
+      document.getElementById("accelSummary").textContent = "Motion Sensor Active";
+      showToast("Accelerometer enabled.");
     } catch (err) {
       showToast(err.message);
     }
   });
 
   document.getElementById("btnSimulateJolt").addEventListener("click", () => {
-    const force = SensorService.simulateJolt();
-    showToast(`Simulated pothole jolt (${force} m/s²) — opening report form.`);
+    const f = SensorService.simulateJolt();
+    showToast(`Simulated jolt (${f} m/s²)`);
   });
 
-  // Weather refresh
   document.getElementById("btnFetchWeather").addEventListener("click", async () => {
     const w = await WeatherService.fetchWeather(SensorService.coords.lat, SensorService.coords.lng);
     document.getElementById("weatherSummary").textContent = WeatherService.formatSummary(w);
     renderAll();
-    showToast("Live weather & rainfall updated.");
+    showToast("Weather conditions updated.");
   });
 
-  // Sample & Reset demo data
+  // Data, Map & Filters
   document.getElementById("btnLoadSample").addEventListener("click", async () => {
     await RoadStore.replaceAllHazards(getSampleHazards());
-    showToast("Loaded sample road intelligence dataset.");
+    showToast("Sample data loaded.");
   });
 
   document.getElementById("btnResetDemoData").addEventListener("click", async () => {
     AppState.crowdEvents = [];
     AppState.activeAlerts = [];
     await RoadStore.replaceAllHazards(getSampleHazards());
-    showToast("Reset demo hazards and activity log.");
+    showToast("Demo data reset.");
   });
 
-  // Map & Filter controls
+  document.getElementById("btnFixMapSize").addEventListener("click", () => {
+    refreshMapLayout();
+    showToast("Map layout refreshed.");
+  });
+
   document.getElementById("btnCenterMapGps").addEventListener("click", () => {
     if (AppState.map) {
       AppState.map.setView([SensorService.coords.lat, SensorService.coords.lng], 13);
-      showToast("Centered map on active GPS coordinates.");
+      refreshMapLayout();
+      showToast("Centered on active GPS.");
     }
   });
 
@@ -646,21 +705,19 @@ function bindEvents() {
   });
 
   document.getElementById("btnResetFilters").addEventListener("click", () => {
-    AppState.filters.search = "";
-    AppState.filters.severity = "ALL";
-    AppState.filters.status = "ALL";
+    AppState.filters = { search: "", severity: "ALL", status: "ALL", sortRisk: "SCORE_DESC" };
     document.getElementById("searchRoadInput").value = "";
     document.getElementById("filterSeverity").value = "ALL";
     document.getElementById("filterStatus").value = "ALL";
+    document.getElementById("sortRiskSelect").value = "SCORE_DESC";
     renderAll();
     showToast("Filters reset.");
   });
 
-  // Vehicle Alert Network buttons
+  // Vehicle Alert Network
   document.getElementById("btnCheckAlerts").addEventListener("click", () => {
-    const { lat, lng } = SensorService.coords;
-    const alerts = runProximityCheck(lat, lng, "Active GPS");
-    showToast(`Found ${alerts.length} hazard warning(s) within radius.`);
+    const alerts = runProximityCheck(SensorService.coords.lat, SensorService.coords.lng, "Active GPS");
+    showToast(`${alerts.length} proximity alert(s) found.`);
   });
 
   document.getElementById("btnSimulateVehicle").addEventListener("click", startVehicleSimulation);
@@ -672,7 +729,7 @@ function bindEvents() {
     }
     AppState.activeAlerts = [];
     renderVehicleAlerts();
-    showToast("Cleared active vehicle alerts.");
+    showToast("Alerts cleared.");
   });
 }
 
@@ -683,9 +740,6 @@ async function bootstrap() {
   if (RoadStore.isLiveFirebase) {
     badge.textContent = "● Firebase Live Sync";
     badge.className = "status-pill status-live";
-  } else {
-    badge.textContent = "● Demo / Local Mode";
-    badge.className = "status-pill status-demo";
   }
 
   SensorService.onGpsUpdate = (coords) => {
@@ -694,8 +748,7 @@ async function bootstrap() {
   };
 
   SensorService.onJoltDetected = (jolt) => {
-    document.getElementById("accelSummary").textContent =
-      `Jolt ${jolt.forceMs2} m/s² (${jolt.gForce}g) via ${jolt.source}`;
+    document.getElementById("accelSummary").textContent = `Jolt ${jolt.forceMs2} m/s² (${jolt.gForce}g)`;
     openReportModal({
       lat: jolt.coords.lat.toFixed(6),
       lng: jolt.coords.lng.toFixed(6),
